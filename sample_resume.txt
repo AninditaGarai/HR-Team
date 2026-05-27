@@ -1,0 +1,1 @@
+Senior Python engineer with ML, SQL, Postgres, FastAPI, and data pipeline experience. Built dashboards and automated screening workflows.
