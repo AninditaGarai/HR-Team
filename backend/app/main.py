@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 import io
 import json
 from datetime import datetime
@@ -8,7 +9,7 @@ from datetime import datetime
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from .schemas import DatasetSummary, ResumeAnalysisRequest, ResumeAnalysisResponse
+from .schemas import DatasetSummary, ResumeAnalysisRequest, ResumeAnalysisResponse, ResumeExtraction
 from .services.dataset import category_counts, load_rows, top_keywords
 from .services.resume_agent import analyze_resume
 from .services.interview_agent import generate_interview
@@ -63,6 +64,8 @@ def resume_analyze(payload: ResumeAnalysisRequest) -> ResumeAnalysisResponse:
         confidence=result.confidence,
         matched_keywords=result.matched_keywords,
         summary=result.summary,
+        extraction=ResumeExtraction.model_validate(asdict(result.extraction)),
+        source_text=result.source_text,
     )
 
 
@@ -80,6 +83,8 @@ async def resume_upload_analyze(file: UploadFile = File(...)) -> ResumeAnalysisR
         confidence=result.confidence,
         matched_keywords=result.matched_keywords,
         summary=result.summary,
+        extraction=ResumeExtraction.model_validate(asdict(result.extraction)),
+        source_text=result.source_text,
     )
 
 

@@ -14,6 +14,16 @@ type ResumeAnalysis = {
   confidence: number;
   matchedKeywords: string[];
   summary: string;
+  sourceText?: string;
+  extraction?: {
+    emails: string[];
+    phone_numbers: string[];
+    years_of_experience: string | null;
+    skills: string[];
+    education: string[];
+    job_titles: string[];
+    source_text: string;
+  };
 };
 
 type InterviewSession = {
@@ -61,6 +71,31 @@ const QUICK_HIGHLIGHTS = [
     detail: "Shows dataset distribution and analysis results together.",
   },
 ];
+
+const normalizeResumeAnalysis = (payload: Record<string, unknown> | null | undefined): ResumeAnalysis => {
+  const safePayload = payload ?? {};
+  const extraction = (safePayload.extraction as Record<string, unknown> | undefined) ?? undefined;
+
+  return {
+    category: String(safePayload.category ?? ""),
+    score: Number(safePayload.score ?? 0),
+    confidence: Number(safePayload.confidence ?? 0),
+    matchedKeywords: (safePayload.matchedKeywords as string[] | undefined) ?? (safePayload.matched_keywords as string[] | undefined) ?? [],
+    summary: String(safePayload.summary ?? ""),
+    sourceText: String(safePayload.sourceText ?? safePayload.source_text ?? ""),
+    extraction: extraction
+      ? {
+          emails: (extraction.emails as string[] | undefined) ?? [],
+          phone_numbers: (extraction.phone_numbers as string[] | undefined) ?? [],
+          years_of_experience: (extraction.years_of_experience as string | null | undefined) ?? null,
+          skills: (extraction.skills as string[] | undefined) ?? [],
+          education: (extraction.education as string[] | undefined) ?? [],
+          job_titles: (extraction.job_titles as string[] | undefined) ?? [],
+          source_text: String(extraction.source_text ?? ""),
+        }
+      : undefined,
+  };
+};
 
 export default function Home() {
   const [dataset, setDataset] = useState<DatasetStats | null>(null);
@@ -137,10 +172,11 @@ export default function Home() {
         body: JSON.stringify({ text: resumeText }),
       });
 
-      const payload = (await response.json()) as ResumeAnalysis & { error?: string };
+      const rawPayload = (await response.json()) as Record<string, unknown>;
+      const payload = normalizeResumeAnalysis(rawPayload);
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to analyze the resume.");
+        throw new Error(String(rawPayload.error ?? rawPayload.detail ?? "Unable to analyze the resume."));
       }
 
       setAnalysis(payload);
@@ -169,14 +205,15 @@ export default function Home() {
         body: formData,
       });
 
-      const payload = (await response.json()) as ResumeAnalysis & { error?: string; detail?: string };
+      const rawPayload = (await response.json()) as Record<string, unknown>;
+      const payload = normalizeResumeAnalysis(rawPayload);
 
       if (!response.ok) {
-        throw new Error(payload.detail ?? payload.error ?? "Unable to analyze the uploaded resume.");
+        throw new Error(String(rawPayload.detail ?? rawPayload.error ?? "Unable to analyze the uploaded resume."));
       }
 
       setAnalysis(payload);
-      setResumeText(`Uploaded file: ${fileToAnalyze.name}`);
+      setResumeText(payload.sourceText && payload.sourceText.trim() ? payload.sourceText : `Uploaded file: ${fileToAnalyze.name}`);
     } catch (analyzeError) {
       setError(analyzeError instanceof Error ? analyzeError.message : "Unexpected error.");
     } finally {
@@ -233,7 +270,7 @@ export default function Home() {
         body: JSON.stringify({ text: resumeText }),
       });
 
-      const analysisPayload = await aResp.json();
+      const analysisPayload = normalizeResumeAnalysis((await aResp.json()) as Record<string, unknown>);
       const keywords = analysisPayload.matchedKeywords ?? [];
       const category = analysisPayload.category ?? undefined;
 
@@ -577,6 +614,47 @@ export default function Home() {
                 <p className="mt-4 text-sm text-emerald-100">
                   Confidence: <span className="font-semibold">{analysis.confidence}%</span>
                 </p>
+                {analysis.extraction ? (
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl bg-white/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.25em] text-emerald-200">Detected skills</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {analysis.extraction.skills.length > 0 ? (
+                          analysis.extraction.skills.map((skill) => (
+                            <span key={skill} className="rounded-full bg-white/10 px-3 py-1 text-xs text-emerald-50">
+                              {skill}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-sm text-emerald-50/80">No obvious skills detected.</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-white/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.25em] text-emerald-200">Contact & experience</p>
+                      <div className="mt-3 space-y-2 text-sm text-emerald-50/90">
+                        <p>Emails: {analysis.extraction.emails.length > 0 ? analysis.extraction.emails.join(", ") : "—"}</p>
+                        <p>Phone: {analysis.extraction.phone_numbers.length > 0 ? analysis.extraction.phone_numbers.join(", ") : "—"}</p>
+                        <p>Experience: {analysis.extraction.years_of_experience ?? "—"}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-white/10 p-4 sm:col-span-2">
+                      <p className="text-xs uppercase tracking-[0.25em] text-emerald-200">Education and target roles</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(analysis.extraction.education.length > 0 ? analysis.extraction.education : ["—"]).map((item) => (
+                          <span key={item} className="rounded-full bg-white/10 px-3 py-1 text-xs text-emerald-50">
+                            {item}
+                          </span>
+                        ))}
+                        {(analysis.extraction.job_titles.length > 0 ? analysis.extraction.job_titles : ["—"]).map((item) => (
+                          <span key={item} className="rounded-full bg-white/10 px-3 py-1 text-xs text-emerald-50">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="mt-6 rounded-[1.5rem] border border-white/10 bg-white/5 p-5 text-sm leading-6 text-slate-300">
