@@ -129,7 +129,17 @@ def predict_resume(text: str) -> ResumePrediction:
     signal_scores.sort(key=lambda item: item[0], reverse=True)
     matched_keywords = _dedupe_terms((term for _, term in signal_scores), limit=8)
 
-    score = int(round(min(100.0, best_probability * 100.0)))
+    # Base score from model probability (0-100)
+    prob_score = best_probability * 100.0
+
+    # Keyword signal: more matched keywords -> higher heuristic boost (up to 100)
+    keyword_score = min(1.0, len(matched_keywords) / 5.0) * 100.0
+
+    # Blend model probability with keyword signal to give short resumes more reasonable scores.
+    # Weights chosen conservatively: 65% model probability, 35% keyword signal.
+    score = int(round(min(100.0, 0.65 * prob_score + 0.35 * keyword_score)))
+
+    # Keep existing confidence metric based on margin vs runner-up.
     confidence = int(round(min(99.0, max(1.0, (best_probability - runner_up_probability + 1.0) * 50.0))))
 
     if matched_keywords:
