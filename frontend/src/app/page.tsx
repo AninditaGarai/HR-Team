@@ -16,6 +16,7 @@ type ResumeAnalysis = {
   summary: string;
   sourceText?: string;
   extraction?: {
+    name: string | null;
     emails: string[];
     phone_numbers: string[];
     years_of_experience: string | null;
@@ -85,6 +86,7 @@ const normalizeResumeAnalysis = (payload: Record<string, unknown> | null | undef
     sourceText: String(safePayload.sourceText ?? safePayload.source_text ?? ""),
     extraction: extraction
       ? {
+          name: (extraction.name as string | null | undefined) ?? null,
           emails: (extraction.emails as string[] | undefined) ?? [],
           phone_numbers: (extraction.phone_numbers as string[] | undefined) ?? [],
           years_of_experience: (extraction.years_of_experience as string | null | undefined) ?? null,
@@ -633,6 +635,7 @@ export default function Home() {
                     <div className="rounded-2xl bg-white/10 p-4">
                       <p className="text-xs uppercase tracking-[0.25em] text-emerald-200">Contact & experience</p>
                       <div className="mt-3 space-y-2 text-sm text-emerald-50/90">
+                        <p>Name: {analysis.extraction.name ?? "—"}</p>
                         <p>Emails: {analysis.extraction.emails.length > 0 ? analysis.extraction.emails.join(", ") : "—"}</p>
                         <p>Phone: {analysis.extraction.phone_numbers.length > 0 ? analysis.extraction.phone_numbers.join(", ") : "—"}</p>
                         <p>Experience: {analysis.extraction.years_of_experience ?? "—"}</p>

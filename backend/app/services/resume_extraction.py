@@ -6,7 +6,7 @@ import re
 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 PHONE_RE = re.compile(
-    r"(?:\+?\d{1,3}[-.\s]?)?(?:\d{5}[-.\s]?\d{5}|\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\d{10})"
+    r"(?:\+?\d{1,3}[-.\s]?)?(?:\d{5}[-.\s]?\d{5}|\d{10}|\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})"
 )
 EXPERIENCE_RE = re.compile(r"\b\d{1,2}(?:\.\d+)?\+?\s*(?:years?|yrs?)\b", re.IGNORECASE)
 
@@ -66,6 +66,7 @@ TITLE_ALIASES: list[tuple[str, tuple[str, ...]]] = [
 
 @dataclass(slots=True)
 class ResumeExtraction:
+    name: str | None
     emails: list[str]
     phone_numbers: list[str]
     years_of_experience: str | None
@@ -118,15 +119,57 @@ def _extract_experience(text: str) -> str | None:
     return None
 
 
+def _extract_name(text: str) -> str | None:
+    contact_patterns = [EMAIL_RE, PHONE_RE]
+    resume_lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    for line in resume_lines[:8]:
+        if any(pattern.search(line) for pattern in contact_patterns):
+            continue
+
+        normalized = re.sub(r"\s+", " ", line).strip("-•|,;:")
+        words = [word for word in normalized.split() if word]
+        if not (1 < len(words) <= 4):
+            continue
+        if any(char.isdigit() for char in normalized):
+            continue
+        if "@" in normalized:
+            continue
+
+        lowered = normalized.lower()
+        if any(keyword in lowered for keyword in ("engineer", "developer", "analyst", "manager", "intern", "summary", "experience", "profile", "objective")):
+            continue
+
+        if normalized.isupper() or all(word[:1].isupper() for word in words):
+            return normalized.title() if normalized.isupper() else normalized
+
+    return None
+
+
+def _normalize_phone_number(phone: str) -> str:
+    cleaned = re.sub(r"[\s.-]", " ", phone).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+
+    if cleaned.startswith("+"):
+        return cleaned
+
+    if len(re.sub(r"\D", "", cleaned)) >= 10:
+        return cleaned
+
+    return phone.strip()
+
+
 def extract_resume_profile(text: str) -> ResumeExtraction:
+    name = _extract_name(text)
     emails = _unique(EMAIL_RE.findall(text))
-    phone_numbers = _unique(PHONE_RE.findall(text))
+    phone_numbers = _unique([_normalize_phone_number(match) for match in PHONE_RE.findall(text)])
     skills = _unique(_find_aliases(text, SKILL_ALIASES))
     education = _unique(_find_aliases(text, DEGREE_ALIASES))
     job_titles = _unique(_find_aliases(text, TITLE_ALIASES))
     years_of_experience = _extract_experience(text)
 
     return ResumeExtraction(
+        name=name,
         emails=emails,
         phone_numbers=phone_numbers,
         years_of_experience=years_of_experience,

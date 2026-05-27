@@ -8,6 +8,7 @@ class ResumeAnalysisRequest(BaseModel):
 
 
 class ResumeExtraction(BaseModel):
+    name: str | None
     emails: list[str]
     phone_numbers: list[str]
     years_of_experience: str | None
