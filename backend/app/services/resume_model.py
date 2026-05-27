@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterable
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
+from sklearn.calibration import CalibratedClassifierCV
+import joblib
 
 from .dataset import load_rows, tokenize
 
@@ -66,16 +69,40 @@ def get_resume_classifier() -> ResumeClassifier:
         class_weight="balanced",
     )
 
+    # train vectorizer on texts and then calibrate the classifier
+    X = vectorizer.fit_transform(texts)
+
+    # fit base classifier
+    classifier.fit(X, labels)
+
+    # calibrate probabilities using cross-validation
+    try:
+        calibrated = CalibratedClassifierCV(classifier, cv=3)
+        calibrated.fit(X, labels)
+        trained_classifier = calibrated
+    except Exception:
+        # fallback: use uncalibrated classifier if calibration fails
+        trained_classifier = classifier
+
     pipeline = Pipeline([
         ("vectorizer", vectorizer),
-        ("classifier", classifier),
+        ("classifier", trained_classifier),
     ])
-    pipeline.fit(texts, labels)
+
+    # persist the trained pipeline for faster startup
+    models_dir = Path(__file__).resolve().parents[2] / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    model_path = models_dir / "resume_classifier.joblib"
+    try:
+        joblib.dump({"pipeline": pipeline, "training_rows": len(texts), "categories": list(trained_classifier.classes_)}, model_path)
+    except Exception:
+        # if saving fails, continue without failing startup
+        pass
 
     return ResumeClassifier(
         pipeline=pipeline,
         training_rows=len(texts),
-        categories=list(pipeline.named_steps["classifier"].classes_),
+        categories=list(trained_classifier.classes_),
     )
 
 
@@ -107,23 +134,44 @@ def predict_resume(text: str) -> ResumePrediction:
 
     vectorizer: TfidfVectorizer = pipeline.named_steps["vectorizer"]
     model: LogisticRegression = pipeline.named_steps["classifier"]
-
     text_vector = vectorizer.transform([text]).tocsr()
     feature_names = vectorizer.get_feature_names_out()
-    class_index = list(model.classes_).index(best_category)
-    coefficients = model.coef_[class_index]
-
+    # attempt to extract positive feature contributions from the underlying model
     signal_scores: list[tuple[float, str]] = []
-    for feature_index, tfidf_value in zip(text_vector.indices, text_vector.data):
-        feature_name = feature_names[feature_index]
-        if " " in feature_name:
-            continue
+    try:
+        # calibrated classifiers may not expose `coef_` directly; try to get the base estimator
+        base_model = None
+        if hasattr(model, "base_estimator_") and getattr(model, "base_estimator_") is not None:
+            base_model = model.base_estimator_
+        elif hasattr(model, "base_estimator") and getattr(model, "base_estimator") is not None:
+            base_model = model.base_estimator
+        elif hasattr(model, "estimators_") and getattr(model, "estimators_"):
+            # take first underlying estimator
+            base_model = model.estimators_[0]
+        else:
+            base_model = model
 
-        contribution = max(coefficients[feature_index], 0.0) * tfidf_value
-        if contribution > 0:
-            signal_scores.append((contribution, feature_name))
+        class_index = list(model.classes_).index(best_category)
+        coefficients = getattr(base_model, "coef_", None)
 
-    if not signal_scores:
+        if coefficients is not None:
+            if coefficients.ndim > 1:
+                class_coef = coefficients[class_index]
+            else:
+                class_coef = coefficients
+
+            for feature_index, tfidf_value in zip(text_vector.indices, text_vector.data):
+                feature_name = feature_names[feature_index]
+                if " " in feature_name:
+                    continue
+
+                contribution = max(class_coef[feature_index], 0.0) * tfidf_value
+                if contribution > 0:
+                    signal_scores.append((contribution, feature_name))
+        else:
+            # fallback: use raw tfidf values as signal when coefficients are not available
+            signal_scores = [(float(value), feature_names[index]) for index, value in zip(text_vector.indices, text_vector.data)]
+    except Exception:
         signal_scores = [(float(value), feature_names[index]) for index, value in zip(text_vector.indices, text_vector.data)]
 
     signal_scores.sort(key=lambda item: item[0], reverse=True)
